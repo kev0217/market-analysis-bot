@@ -4,8 +4,7 @@ import yfinance as yf
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
 
-TOKEN = os.environ["TELEGRAM_TOKEN"]
-
+TOKEN = os.environ["TELEGRAM_TOKEN"].strip()
 def analizar(ticker):
     try:
         datos = yf.Ticker(ticker).history(period="6mo")
