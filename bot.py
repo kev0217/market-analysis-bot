@@ -151,38 +151,4 @@ app.add_handler(CommandHandler("start", start))
 app.add_handler(CommandHandler("analiza", analiza))
 app.add_handler(CommandHandler("stats", stats))
 app.add_handler(CallbackQueryHandler(boton))
-app.run_polling()"
-        if rsi > 70:
-            senal = "sobrecompra"
-        elif rsi < 30:
-            senal = "sobreventa"
-        else:
-            senal = "neutral"
-
-        return (
-            f"{ticker.upper()}\n"
-            f"Precio: {precio:.2f} ({cambio:+.2f}% hoy)\n"
-            f"Media 20d: {media20:.2f} | Media 50d: {media50:.2f}\n"
-            f"Tendencia: {tendencia}\n"
-            f"RSI: {rsi:.1f} ({senal})\n\n"
-            f"Solo informativo, no es asesoría financiera."
-        )
-    except Exception:
-        return "Hubo un error al analizar ese ticker."
-
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "Hola 👋 Usa /analiza seguido de un ticker.\nEjemplo: /analiza AAPL"
-    )
-
-async def analiza(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not context.args:
-        await update.message.reply_text("Uso: /analiza AAPL")
-        return
-    texto = await asyncio.to_thread(analizar, context.args[0])
-    await update.message.reply_text(texto)
-
-app = Application.builder().token(TOKEN).build()
-app.add_handler(CommandHandler("start", start))
-app.add_handler(CommandHandler("analiza", analiza))
 app.run_polling()
