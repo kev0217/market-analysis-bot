@@ -1,6 +1,7 @@
 import os
 import json
 import asyncio
+import pandas as pd
 import yfinance as yf
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
@@ -145,6 +146,74 @@ async def evaluar(message, simbolo, tf, precio, sesgo, espera):
     await message.reply_text(
         f"{marca} · {simbolo} {tf} ({sesgo})\n{precio:.4f} → {nuevo:.4f}"
     )
+BT_PERIODOS = {
+    "1m": ("1m", "7d"),
+    "5m": ("5m", "60d"),
+    "15m": ("15m", "60d"),
+    "30m": ("30m", "60d"),
+    "1h": ("1h", "2y"),
+    "4h": ("1h", "2y"),
+    "1d": ("1d", "10y"),
+}
+
+def resumen(sub):
+    t = len(sub)
+    if t == 0:
+        return "sin señales"
+    a = int(sub["ok"].sum())
+    neto = a * 0.85 - (t - a)
+    return f"{a}/{t} ({a / t * 100:.1f}%) · neto {neto:+.1f} u"
+
+def backtest_calc(ticker, tf):
+    try:
+        intervalo, periodo = BT_PERIODOS[tf]
+        datos = yf.Ticker(ticker).history(period=periodo, interval=intervalo)
+        if tf == "4h" and not datos.empty:
+            datos = datos.resample("4h").agg({"Close": "last"}).dropna()
+        if datos.empty or len(datos) < 300:
+            return "Sin datos suficientes para el backtest."
+
+        c = datos["Close"]
+        ema50 = c.ewm(span=50, adjust=False).mean()
+        ema200 = c.ewm(span=200, adjust=False).mean()
+        delta = c.diff()
+        gan = delta.clip(lower=0).rolling(14).mean()
+        per = (-delta.clip(upper=0)).rolling(14).mean()
+        rsi = 100 - 100 / (1 + gan / per)
+
+        score = (
+            (c > ema50).astype(int)
+            + (ema50 > ema200).astype(int)
+            + (rsi > 50).astype(int)
+        )
+        df = pd.DataFrame({"c": c, "s": score, "n": c.shift(-1)}).iloc[200:-2]
+        df = df[df["n"] != df["c"]].copy()
+        alc = df["s"] >= 2
+        df["ok"] = ((df["n"] > df["c"]) & alc) | ((df["n"] < df["c"]) & ~alc)
+        fuertes = df[(df["s"] == 3) | (df["s"] == 0)]
+
+        return (
+            f"📊 Backtest {ticker} · {tf}\n"
+            f"Velas probadas: {len(df)}\n\n"
+            f"Todas las señales:\n{resumen(df)}\n\n"
+            f"Solo fuertes (3/3 o 0/3):\n{resumen(fuertes)}\n\n"
+            f"Equilibrio con pago 85%: 54.1%\n"
+            f"u = unidades apostadas. Sin spread ni comisiones.\n"
+            f"Es el pasado, no garantiza nada."
+        )
+    except Exception:
+        return "Error en el backtest."
+
+async def backtest(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if len(context.args) < 2 or context.args[1].lower() not in TEMPORALIDADES:
+        await update.message.reply_text("Uso: /backtest EUR/USD 5m")
+        return
+    simbolo = normalizar(context.args[0])
+    tf = context.args[1].lower()
+    await update.message.reply_text("Calculando, un momento...")
+    texto = await asyncio.to_thread(backtest_calc, simbolo, tf)
+    await update.message.reply_text(texto)
+
 async def enviar_analisis(message, simbolo, tf):
     texto, precio, sesgo = await asyncio.to_thread(analizar, simbolo, tf)
     await message.reply_text(texto, reply_markup=teclado_tf(simbolo))
@@ -166,7 +235,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "Hola 👋 Elige un mercado, o escribe cualquier ticker "
         "(ej. AMZN, ETH-USD, EUR/CHF).\n\n"
-        "También: /analiza AMZN 15m y /stats",
+        "También: /analiza AMZN 15m, /backtest EUR/USD 5m y /stats",
         reply_markup=teclado_mercados(),
     )
 
@@ -223,6 +292,7 @@ app = Application.builder().token(TOKEN).build()
 app.add_handler(CommandHandler("start", start))
 app.add_handler(CommandHandler("analiza", analiza))
 app.add_handler(CommandHandler("stats", stats))
+app.add_handler(CommandHandler("backtest", backtest))
 app.add_handler(CallbackQueryHandler(boton))
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, texto_libre))
 app.run_polling()
