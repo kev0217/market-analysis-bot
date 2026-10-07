@@ -20,15 +20,14 @@ MERCADOS = {
     "ORO": "GC=F", "S&P500": "^GSPC",
 }
 
-# nombre: (intervalo, periodo, segundos para evaluar o None)
 TEMPORALIDADES = {
     "1m": ("1m", "5d", 60),
-    "5m": ("5m", "5d", 300),
-    "15m": ("15m", "10d", 900),
-    "30m": ("30m", "1mo", 1800),
-    "1h": ("1h", "3mo", None),
-    "4h": ("1h", "3mo", None),
-    "1d": ("1d", "1y", None),
+    "5m": ("5m", "1mo", 300),
+    "15m": ("15m", "2mo", 900),
+    "30m": ("30m", "2mo", 1800),
+    "1h": ("1h", "1y", None),
+    "4h": ("1h", "1y", None),
+    "1d": ("1d", "5y", None),
 }
 
 def cargar():
@@ -66,21 +65,20 @@ def teclado_tf(simbolo):
     ]
     filas = [botones[i:i + 4] for i in range(0, len(botones), 4)]
     return InlineKeyboardMarkup(filas)
-
 def analizar(ticker, tf):
     try:
         intervalo, periodo, espera = TEMPORALIDADES[tf]
         datos = yf.Ticker(ticker).history(period=periodo, interval=intervalo)
         if tf == "4h" and not datos.empty:
             datos = datos.resample("4h").agg({"Close": "last"}).dropna()
-        if datos.empty or len(datos) < 50:
-            return "Sin datos suficientes (¿mercado cerrado o ticker inválido?).", None, None
+        if datos.empty or len(datos) < 200:
+            return "Sin datos suficientes para la EMA 200 (¿mercado cerrado o ticker inválido?).", None, None
 
         cierre = datos["Close"]
         precio = float(cierre.iloc[-1])
         cambio = (precio / cierre.iloc[-2] - 1) * 100
-        ema9 = cierre.ewm(span=9, adjust=False).mean().iloc[-1]
-        ema21 = cierre.ewm(span=21, adjust=False).mean().iloc[-1]
+        ema50 = cierre.ewm(span=50, adjust=False).mean().iloc[-1]
+        ema200 = cierre.ewm(span=200, adjust=False).mean().iloc[-1]
 
         delta = cierre.diff()
         ganancia = delta.clip(lower=0).rolling(14).mean()
@@ -94,7 +92,7 @@ def analizar(ticker, tf):
         else:
             senal = "neutral"
 
-        alcistas = sum([precio > ema9, ema9 > ema21, rsi > 50])
+        alcistas = sum([precio > ema50, ema50 > ema200, rsi > 50])
         sesgo = "alcista" if alcistas >= 2 else "bajista"
         icono = "🟢" if sesgo == "alcista" else "🔴"
         hora = datos.index[-1].strftime("%d/%m %H:%M %Z")
@@ -109,7 +107,7 @@ def analizar(ticker, tf):
             f"━━━━━━━━━━━━\n"
             f"Sesgo {sesgo} {icono}\n\n"
             f"💵 Precio: {precio:.4f} ({cambio:+.2f}%)\n"
-            f"〰️ EMA 9 / 21: {ema9:.4f} / {ema21:.4f}\n"
+            f"〰️ EMA 50 / 200: {ema50:.4f} / {ema200:.4f}\n"
             f"📐 RSI: {rsi:.1f} ({senal})\n"
             f"🎯 Indicadores alineados: {alcistas}/3\n"
             f"🕒 Última vela: {hora}\n"
@@ -147,7 +145,6 @@ async def evaluar(message, simbolo, tf, precio, sesgo, espera):
     await message.reply_text(
         f"{marca} · {simbolo} {tf} ({sesgo})\n{precio:.4f} → {nuevo:.4f}"
     )
-
 async def enviar_analisis(message, simbolo, tf):
     texto, precio, sesgo = await asyncio.to_thread(analizar, simbolo, tf)
     await message.reply_text(texto, reply_markup=teclado_tf(simbolo))
